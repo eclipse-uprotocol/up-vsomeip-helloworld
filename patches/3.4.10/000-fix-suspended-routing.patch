@@ -1,0 +1,12 @@
+diff --git a/implementation/routing/src/routing_manager_base.cpp b/implementation/routing/src/routing_manager_base.cpp
+index dde6b26..d4e37aa 100644
+--- a/implementation/routing/src/routing_manager_base.cpp
++++ b/implementation/routing/src/routing_manager_base.cpp
+@@ -26,6 +26,7 @@ routing_manager_base::routing_manager_base(routing_manager_host *_host) :
+         io_(host_->get_io()),
+         configuration_(host_->get_configuration()),
+         debounce_timer(host_->get_io())
++        , routing_state_(routing_state_e::RS_RUNNING) // fixes docker "rmi::add_routing_info We are suspended --> do nothing." error
+ #ifdef USE_DLT
+         , tc_(trace::connector_impl::get())
+ #endif
