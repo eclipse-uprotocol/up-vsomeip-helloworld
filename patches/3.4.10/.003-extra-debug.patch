@@ -1,0 +1,40 @@
+diff --git a/implementation/routing/src/routing_manager_impl.cpp b/implementation/routing/src/routing_manager_impl.cpp
+index 79f4080..66d2b5f 100644
+--- a/implementation/routing/src/routing_manager_impl.cpp
++++ b/implementation/routing/src/routing_manager_impl.cpp
+@@ -2379,7 +2379,9 @@ void routing_manager_impl::add_routing_info(
+     std::lock_guard<std::mutex> its_lock(routing_state_mutex_);
+     if (routing_state_ == routing_state_e::RS_SUSPENDED) {
+         VSOMEIP_INFO << "rmi::" << __func__ << " We are suspended --> do nothing.";
+-        return;
++        if (!getenv("VSOMEIP_NO_SUSPEND")) {
++            return;
++        }
+     }
+
+     // Create/Update service info
+@@ -3758,11 +3760,11 @@ void routing_manager_impl::send_subscribe(client_t _client, service_t _service,
+ void routing_manager_impl::set_routing_state(routing_state_e _routing_state) {
+     {
+         std::lock_guard<std::mutex> its_lock(routing_state_mutex_);
++        VSOMEIP_INFO << "rmi::" << __func__ << " Setting routing state:" << (int) _routing_state << ", old:" << (int)routing_state_;
+         if (routing_state_ == _routing_state) {
+             VSOMEIP_INFO << "rmi::" << __func__ << " No routing state change --> do nothing.";
+             return;
+         }
+-
+         routing_state_ = _routing_state;
+     }
+
+diff --git a/implementation/service_discovery/src/service_discovery_impl.cpp b/implementation/service_discovery/src/service_discovery_impl.cpp
+index de6e846..96f5c1e 100644
+--- a/implementation/service_discovery/src/service_discovery_impl.cpp
++++ b/implementation/service_discovery/src/service_discovery_impl.cpp
+@@ -201,6 +201,7 @@ service_discovery_impl::start() {
+
+ void
+ service_discovery_impl::stop() {
++    VSOMEIP_DEBUG << "service_discovery_impl::stop() is_suspended_:" << std::boolalpha << is_suspended_;
+     is_suspended_ = true;
+     stop_ttl_timer();
+     stop_last_msg_received_timer();

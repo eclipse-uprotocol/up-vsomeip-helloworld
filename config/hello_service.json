@@ -1,0 +1,42 @@
+{
+  "unicast": "127.0.0.1",
+  "logging": {
+    "level": "debug",
+    "console": "true",
+    "file": {
+      "enable": "false",
+      "path": "/var/log/vsomeip.log"
+    },
+    "dlt": "false",
+    "version": {
+      "enable": "false"
+    },
+    "__status_log_interval": "30",
+    "__statistics": {
+      "interval": "60",
+      "min-frequency": "5",
+      "max-messages": "10"
+    }
+  },
+  "applications": [
+    {
+      "name": "hello_service",
+      "id": "0x1234"
+    }
+  ],
+  "services": [
+    {
+      "service": "0x6000",
+      "instance": "0x0001",
+      "unreliable": "31234",
+      "reliable": { "port" : "31235", "enable-magic-cookies" : "false" }
+    }
+  ],
+  "routing": "hello_service",
+  "service-discovery": {
+    "enable": "true",
+    "multicast": "239.0.0.1",
+    "port": "30490",
+    "protocol": "udp"
+  }
+}
