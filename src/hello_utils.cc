@@ -366,4 +366,53 @@ std::string to_string(vsomeip::return_code_e rc) {
     }
 }
 
+uint32_t get_env_uint32(const std::string &env_name, const uint32_t default_val) {
+    const char* env_value = std::getenv(env_name.c_str());
+    if (!env_value) return default_val;
+    uint32_t value = default_val;
+    std::string str_value = env_value;
+    try {
+        if (str_value.substr(0, 2) == "0x") { // handle "0x" strings
+            value = static_cast<uint32_t>(std::stoul(str_value.substr(2), nullptr, 16));
+        } else {
+            value = static_cast<uint32_t>(std::stoul(str_value));
+        }
+    } catch (const std::exception& e) {
+        std::cerr << __func__ << ": Invalid value for " << env_name << ": '" << str_value << "'" << std::endl;
+    }
+    return value;
+}
+
+uint32_t parse_uint32(const std::string &value) {
+    uint32_t result = 0;
+    if (value.substr(0, 2) == "0x") { // handle "0x" strings
+        result = static_cast<uint32_t>(std::stoul(value.substr(2), nullptr, 16));
+    } else {
+        result = static_cast<uint32_t>(std::stoul(value));
+    }
+    return result;
+}
+
+
+std::string print_service(vsomeip::service_t service,
+                          vsomeip::instance_t instance)
+{
+    std::stringstream ss;
+    ss << (service == vsomeip::ANY_SERVICE ? "ANY" : to_hex(service)) << "."
+       << (instance == vsomeip::ANY_INSTANCE ? "ANY" : to_hex(instance));
+    return ss.str();
+}
+
+std::string print_service_ver(vsomeip::service_t service,
+                          vsomeip::instance_t instance,
+                          vsomeip::major_version_t major_version,
+                          vsomeip::minor_version_t minor_version)
+{
+    std::stringstream ss;
+    ss << print_service(service, instance) << " v"
+       << (major_version == vsomeip::ANY_MAJOR ? "ANY" : std::to_string(static_cast<int>(major_version))) << "."
+       << (minor_version == vsomeip::ANY_MINOR ? "ANY" : std::to_string(static_cast<int>(minor_version)));
+    return ss.str();
+}
+
 } // namespace HelloExample

@@ -50,8 +50,6 @@ add_executable(hello_service
 )
 target_link_libraries(hello_service
     vsomeip3
-    # ${Boost_LIBRARIES}
-    # ${DL_LIBRARY}
     pthread
 )
 target_include_directories(hello_service
@@ -77,8 +75,6 @@ target_include_directories(hello_client
 )
 target_link_libraries(hello_client
     vsomeip3
-    # ${Boost_LIBRARIES}
-    # ${DL_LIBRARY}
     pthread
 )
 

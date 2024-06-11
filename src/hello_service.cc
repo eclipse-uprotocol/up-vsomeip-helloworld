@@ -16,6 +16,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <pthread.h>
+#include <algorithm>
+#include <atomic>
 #include <csignal>
 #include <chrono>
 #include <random>
@@ -23,6 +25,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <thread>
 #include <mutex>
@@ -37,6 +40,7 @@
 static int debug = ::getenv("DEBUG") ? ::atoi(::getenv("DEBUG")) : 0;
 static bool timer_0ms = ::getenv("NO_TIMERS") ? ::atoi(::getenv("NO_TIMERS")) != 0 : false;
 static bool toggle_offer = ::getenv("TOGGLE_OFFER") ? ::atoi(::getenv("TOGGLE_OFFER")) != 0 : false;
+static bool toggle_ack = ::getenv("TOGGLE_ACK") ? ::atoi(::getenv("TOGGLE_ACK")) != 0 : false;
 
 static const std::string P_ERROR = COL_GREEN + "[HelloSrv] " + COL_RED;
 static const std::string P_INFO  = COL_GREEN + "[HelloSrv] " + COL_WHITE_BOLD;
@@ -48,9 +52,31 @@ static const std::string P_TRACE = COL_YELLOW + "[HelloSrv] " + COL_BLUE;
 #define LOG_INFO   std::cout << P_INFO
 #define LOG_ERROR  std::cerr << P_ERROR
 // terminate log msg (reset colors and flush)
-#define LOG_CR       COL_NONE << std::endl
+#define LOG_CR     COL_NONE << std::endl
 
 namespace HelloExample {
+
+struct service_config_t {
+    vsomeip::service_t service_id;
+    vsomeip::instance_t instance_id;
+    vsomeip::major_version_t major_version;
+    vsomeip::minor_version_t minor_version;
+    vsomeip::method_t method_id;
+    vsomeip::eventgroup_t eventgroup_id;
+    vsomeip::event_t event_id;
+    std::set<vsomeip::service_t> used_services;
+};
+
+service_config_t DEFAULT_CONFIG = {
+    HELLO_SERVICE_ID,
+    HELLO_INSTANCE_ID,
+    HELLO_SERVICE_MAJOR,
+    HELLO_SERVICE_MINOR,
+    HELLO_METHOD_ID,
+    HELLO_EVENTGROUP_ID,
+    HELLO_EVENT_ID,
+    { }
+};
 
 typedef std::map<TimerID, bool> timer_config;
 
@@ -120,6 +146,8 @@ private:
     bool is_registered_;
     bool use_tcp_;
 
+    service_config_t config_;
+
     std::mutex mutex_;
     std::condition_variable condition_;
     bool blocked_;
@@ -143,16 +171,25 @@ private:
 
     Timer timer_;
 
+    // track subscribers and stop sending events (use mutex)
+    std::mutex subscribe_mutex_;
+    std::condition_variable subscribe_condition_;
+    std::atomic_int32_t subscribe_count_;
+
+
 public:
 
-    hello_service(bool _use_tcp) :
-            app_(vsomeip::runtime::get()->create_application()),
-            is_registered_(false),
-            use_tcp_(_use_tcp),
-            blocked_(false),
-            running_(true),
-            is_offered_(false),
-            shutdown_requested_(false) {
+    hello_service(bool _use_tcp, service_config_t _config)
+        : app_(vsomeip::runtime::get()->create_application())
+        , config_(_config)
+        , is_registered_(false)
+        , use_tcp_(_use_tcp)
+        , blocked_(false)
+        , running_(true)
+        , is_offered_(false)
+        , subscribe_count_(0)
+        , shutdown_requested_(false)
+    {
 
         shutdown_thread_ = std::thread((std::bind(&hello_service::shutdown_th, this)));
         offer_thread_ = std::thread((std::bind(&hello_service::offer_th, this)));
@@ -192,56 +229,125 @@ public:
             payload_[Timer_1sec] = vsomeip::runtime::get()->create_payload();
             payload_[Timer_10ms] = vsomeip::runtime::get()->create_payload();
             payload_[Timer_1ms]  = vsomeip::runtime::get()->create_payload();
-
-            // set initial values for events payload...
-            HelloEvent event_1m   = { {}, Timer_1min };
-            HelloEvent event_1s   = { {}, Timer_1sec };
-            HelloEvent event_10ms = { {}, Timer_10ms };
-            HelloEvent event_1ms  = { {}, Timer_1ms };
-
-            serialize_hello_event(event_1m,   payload_[Timer_1min]);
-            serialize_hello_event(event_1s,   payload_[Timer_1sec]);
-            serialize_hello_event(event_10ms, payload_[Timer_10ms]);
-            serialize_hello_event(event_1ms,  payload_[Timer_1ms]);
         }
 
-        //
-        // register HelloWorld example service
-        //
-
-        // register a callback for responses from the service
-        app_->register_message_handler(
-                HELLO_SERVICE_ID,
-                HELLO_INSTANCE_ID,
-                HELLO_METHOD_ID,
-                std::bind(&hello_service::on_message_cb, this,
-                        std::placeholders::_1));
-
-        // register a callback which is called as soon as the service is available
-        app_->register_availability_handler(
-                HELLO_SERVICE_ID,
-                HELLO_INSTANCE_ID,
-                std::bind(&hello_service::on_availability_cb, this,
-                        std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-
-        // advertise HelloEvent via someip-sd
-        std::set<vsomeip::eventgroup_t> event_grous;
-        event_grous.insert(HELLO_EVENTGROUP_ID);
-        app_->offer_event(
-                HELLO_SERVICE_ID, HELLO_INSTANCE_ID, HELLO_EVENT_ID,
-                event_grous,
-                vsomeip::event_type_e::ET_FIELD, std::chrono::milliseconds::zero(),
-                false, true, nullptr,
-                use_tcp_ ? vsomeip::reliability_type_e::RT_RELIABLE : vsomeip::reliability_type_e::RT_UNRELIABLE
-            );
+        register_handlers();
 
         blocked_ = true;
         condition_.notify_one();
         return true;
     }
 
+    void register_handlers() {
+        LOG_INFO << "[register_handlers] Registering message handlers..." << LOG_CR;
+
+        // ALT service handlers
+        for (const auto &service: config_.used_services) {
+            if (debug > 1) LOG_DEBUG << "[register_handlers]  -- register_message_handler() for Service ["
+                << print_service_ver(service, config_.instance_id, config_.major_version, config_.minor_version)
+                << " / method:" << to_hex(config_.method_id) << "]" << LOG_CR;
+            app_->register_message_handler(service, config_.instance_id, HELLO_METHOD_ID,
+                std::bind(&hello_service::on_message_cb, this, std::placeholders::_1));
+        }
+
+        std::set<vsomeip::eventgroup_t> event_groups { config_.eventgroup_id};
+        for (const auto &service: config_.used_services) {
+            if (debug > 1) {
+                LOG_TRACE << "[register_handlers]  -- register_subscription_handler() for Eventgroup ["
+                    << print_service(service, config_.instance_id)
+                    << "." << to_hex(config_.eventgroup_id) << "]" << LOG_CR;
+            }
+            // experimental: register hello event subscription handler
+            app_->register_subscription_handler(
+                service, config_.instance_id, config_.eventgroup_id,
+                std::bind(&hello_service::on_subscription_cb, this,
+                        std::placeholders::_1, std::placeholders::_2,
+                        std::placeholders::_3, std::placeholders::_4,
+                        service, config_.instance_id, config_.eventgroup_id)
+            );
+        }
+    }
+
+    void unregister_handlers() {
+        // keep in sync with register_handlers()
+        for (const auto &service: config_.used_services) {
+            LOG_DEBUG << "[unregister_handlers] Unregistering handlers for Service:"
+                      << print_service(service, config_.instance_id) << LOG_CR;
+            app_->unregister_message_handler(service, config_.instance_id, config_.method_id);
+            app_->unregister_subscription_handler(service, config_.instance_id, config_.eventgroup_id);
+        }
+    }
+
+
     void start() {
         app_->start();
+    }
+
+    ///////////////////////////////////////////////////////////////
+    //////////////////////// vsomeip callbacks ////////////////////
+    ///////////////////////////////////////////////////////////////
+
+    void on_state(vsomeip::state_type_e _state) {
+        LOG_INFO << "Application '" << app_->get_name() << "' is "
+                << (_state == vsomeip::state_type_e::ST_REGISTERED ?
+                "registered." : "deregistered.") << LOG_CR;
+
+        is_registered_ = (_state == vsomeip::state_type_e::ST_REGISTERED);
+        if (is_registered_) {
+            // NOTE: handle registered state in case this application is not the routing vsomeip app on the host
+
+            // we are registered at the runtime and can offer our service
+            // offer(); -> this generates a blocking state handler!
+        }
+    }
+
+     /**
+      * @brief Subscription handler, returning true to ACK, false for NACK client subscription request
+      * NOTE: it seems current impl always returns _clint:0, and for each NACK'ed subscription you also receive an unsubscribe event.
+      * That makes it impossible to properly count the active subscribers for deciding when to stop sending events.
+      */
+    bool on_subscription_cb(
+            vsomeip::client_t _client,
+            const vsomeip_sec_client_t* _sec_client,
+            const std::string& _env,
+            bool _is_subscribed,
+            // extra args to identify listener
+            vsomeip::service_t _service,
+            vsomeip::instance_t _instance,
+            vsomeip::eventgroup_t _group
+    ) {
+        // should we acknowledge the subscription?
+        bool sub_ack = true;
+
+        // total sub_count, used for toggling ack/nack
+        static uint32_t sub_count = 0;
+        if (_is_subscribed) {
+            ++sub_count;
+        }
+        if (toggle_ack && _is_subscribed) { // toggle ack/nack for each new subscription
+            sub_ack = (sub_count % 2 == 1);
+        }
+        LOG_INFO << "### [SOME/IP] Subscription handler for Client:"
+            << to_hex(_client) << " Service:[" << print_service(_service, _instance)
+            << "/" << to_hex(_group) << "]"
+            << (_is_subscribed ? " Subscribed" : " Unsubscribed")
+            // << ", subscribers:"  << subscribe_count_
+            << " -> " << (sub_ack ? COL_GREEN + "ACK " : COL_RED + "NACK")
+            << LOG_CR;
+
+        // TODO: count acknowledged subscibers only (currently impossible)
+        {
+            std::unique_lock<std::mutex> its_lock(subscribe_mutex_);
+            if (_is_subscribed) {
+                // if (sub_ack)
+                subscribe_count_++;
+                subscribe_condition_.notify_all();
+            } else {
+                subscribe_count_--;
+            }
+            LOG_DEBUG << "### [SOME/IP] Subscribed clients: " << subscribe_count_ << LOG_CR;
+        }
+        return sub_ack;
     }
 
     void on_message_cb(const std::shared_ptr<vsomeip::message> &_request) {
@@ -266,31 +372,68 @@ public:
             LOG_DEBUG << its_message.str() << LOG_CR;
             LOG_DEBUG << LOG_CR;
         }
-        // TODO create and send response
+        // create and send response
         std::shared_ptr<vsomeip::message> its_response = vsomeip::runtime::get()->create_response(_request);
-        std::shared_ptr<vsomeip::payload> resp_payload = vsomeip::runtime::get()->create_payload();
 
-        HelloRequest request;
-        if (deserialize_hello_request(request, its_payload)) {
-            if (debug > 0) LOG_DEBUG << "### [SOME/IP] received: '" << to_string(request) << "'" << LOG_CR;
-        } else {
-            LOG_ERROR << "### [SOME/IP] Failed to deserialize request payload!" << LOG_CR;
+        // - sanity checks for protocol version, etc.
+        // - handle expected service/instance/method
+        vsomeip::service_t req_service = _request->get_service();
+        vsomeip::instance_t req_inst = _request->get_instance();
+        if (_request->get_protocol_version() != VSOMEIP_PROTOCOL_VERSION) {
+            LOG_ERROR << "[on_message] Invalid request protocol version: " << to_hex(_request->get_protocol_version()) << LOG_CR;
+            its_response->set_return_code(vsomeip::return_code_e::E_WRONG_PROTOCOL_VERSION);
+        } else if (req_service != config_.service_id && config_.used_services.find(req_service) == config_.used_services.end()) {
+            LOG_ERROR << "[on_message] request for Unknown Service ID: " << to_hex(req_service) << LOG_CR;
+            its_response->set_return_code(vsomeip::return_code_e::E_UNKNOWN_SERVICE);
+        } else if (_request->get_interface_version() != config_.major_version &&
+                   _request->get_interface_version() != vsomeip::ANY_MAJOR) {
+            // TODO: check if requesting for ANY_MAJOR should be allwoed.. allow it for now
+            LOG_ERROR << "[on_message] Invalid request interface version: "
+                      << std::hex << static_cast<int>(_request->get_interface_version())
+                      << ", expected: " << std::hex << static_cast<int>(config_.major_version) << LOG_CR;
+            its_response->set_return_code(vsomeip::return_code_e::E_WRONG_INTERFACE_VERSION);
+        } else if (req_inst != config_.instance_id) {
+            LOG_ERROR << "[on_message] Unknown Instance for Service:"
+                      << print_service(req_service, req_inst) << LOG_CR;
+            its_response->set_return_code(vsomeip::return_code_e::E_UNKNOWN); // no E_UNKNOWN_INSTANCE defined
+        } else if (req_service == config_.service_id || config_.used_services.find(req_service) != config_.used_services.end()) {
+            HelloRequest request;
+            std::shared_ptr<vsomeip::payload> resp_payload = vsomeip::runtime::get()->create_payload();
+            if (deserialize_hello_request(request, its_payload)) {
+                if (debug > 0) LOG_DEBUG << "### [SOME/IP]"
+                    << " [" << print_service(req_service, req_inst) << "] received: '"
+                    << to_string(request) << "'" << LOG_CR;
+                // sayHello should return "Hello " + request.message
+                HelloResponse response = { "Hello " + request.message };
+                serialize_hello_response(response, resp_payload);
+                its_response->set_payload(resp_payload);
+                its_response->set_return_code(vsomeip::return_code_e::E_OK);
+                if (debug > 0) LOG_DEBUG << "### [SOME/IP] Sending Response [" << to_string(response) << "]" << LOG_CR;
+            } else {
+                LOG_ERROR << "[on_message] Failed to deserialize request payload!" << LOG_CR;
+                its_response->set_return_code(vsomeip::return_code_e::E_MALFORMED_MESSAGE);
+            }
+        } else if (req_inst != config_.instance_id) {
+            LOG_ERROR << "### [SOME/IP] Invalid Instance ID: " << to_hex(req_inst) << LOG_CR;
+            its_response->set_return_code(vsomeip::return_code_e::E_NOT_OK);
+            return;
+        } else if (_request->get_method() != config_.method_id) {
+            LOG_ERROR << "### [SOME/IP] Invalid Method ID: " << to_hex(_request->get_method()) << LOG_CR;
+            its_response->set_return_code(vsomeip::return_code_e::E_UNKNOWN_METHOD);
+            return;
         }
-
-        // sayHello should return "Hello " + request.message
-        HelloResponse response = { "Hello " + request.message };
-        serialize_hello_response(response, resp_payload);
-        its_response->set_payload(resp_payload);
-
-        if (debug > 0) LOG_DEBUG << "### [SOME/IP] Sending Response [" << to_string(response) << "]" << LOG_CR;
         app_->send(its_response);
-        if (debug > 1) LOG_TRACE << "[on_message_cb] done." << LOG_CR;
+        if (debug > 1) LOG_TRACE << "[on_message] done." << LOG_CR;
     }
 
     void on_availability_cb(vsomeip::service_t _service, vsomeip::instance_t _instance, bool _is_available) {
-        LOG_INFO << "### [SOME/IP] Service ["
-                << to_hex(_service) << "." << to_hex(_instance) << "] is "
-                << (_is_available ? "Available." : "NOT available.") << LOG_CR;
+        if (debug > 0) {
+            std::stringstream ss;
+            ss << "### [SOME/IP] Service ["
+                    << print_service(_service, _instance) << "] is "
+                    << (_is_available ? "Available." : "NOT available.");
+            LOG_DEBUG << ss.str() << LOG_CR;
+        }
     }
 
     /*
@@ -340,7 +483,8 @@ public:
         notify_condition_.notify_all();
 
         app_->unregister_state_handler();
-        app_->unregister_message_handler(HELLO_SERVICE_ID, HELLO_INSTANCE_ID, HELLO_METHOD_ID);
+        // unregister configured handlers
+        unregister_handlers();
         app_->clear_all_handler();
 
         stop_offer();
@@ -367,39 +511,58 @@ public:
 
     void offer() {
         std::lock_guard<std::mutex> its_lock(notify_mutex_);
-        LOG_INFO << "Application '" << app_->get_name() << "' offering Service ["
-                << to_hex(HELLO_SERVICE_ID) << "." << to_hex(HELLO_INSTANCE_ID)
-                << " v" << HELLO_SERVICE_MAJOR << "." << HELLO_SERVICE_MINOR
-                << "]" << LOG_CR;
-        app_->offer_service(HELLO_SERVICE_ID, HELLO_INSTANCE_ID,
-                HELLO_SERVICE_MAJOR, HELLO_SERVICE_MINOR);
+        LOG_INFO << "[offer] Application '" << app_->get_name() << "' offering services" << LOG_CR;
+        if (debug > 0) {
+            std::stringstream ss;
+            ss << "[offer]   - offer_service("
+            << print_service_ver(config_.service_id, config_.instance_id, config_.major_version, config_.minor_version)
+            << ")";
+            LOG_DEBUG << ss.str() << LOG_CR;
+        }
+        app_->offer_service(config_.service_id, config_.instance_id, config_.major_version, config_.minor_version);
+        for (const auto& service: config_.used_services) {
+            if (debug > 0) {
+                std::stringstream ss;
+                ss << "[offer]   - offer_service("
+                << print_service_ver(service, config_.instance_id, config_.major_version, config_.minor_version)
+                << ")";
+                LOG_DEBUG << ss.str() << LOG_CR;
+            }
+            app_->offer_service(service, config_.instance_id, config_.major_version, config_.minor_version);
+        }
+        // also offer events
+        if (debug > 0) {
+            std::stringstream ss;
+            ss  << "[offer]   - offer_event: "
+                << to_hex(config_.event_id) << "/{" << to_hex(config_.eventgroup_id) << "}"
+                << " for Service ["
+                << print_service_ver(config_.service_id, config_.instance_id, config_.major_version, config_.minor_version)
+                << "]";
+            LOG_DEBUG << ss.str() << LOG_CR;
+        }
+        std::set<vsomeip::eventgroup_t> groups = { config_.eventgroup_id };
+        app_->offer_event(
+                config_.service_id,
+                config_.instance_id,
+                config_.event_id,
+                groups,
+                // vsomeip::event_type_e::ET_FIELD, // NOTE: [PRS_SOMEIP_00179] A field shall be a combination of getter, setter and notification event.
+                vsomeip::event_type_e::ET_EVENT,
+                std::chrono::milliseconds::zero(),
+                false, true, nullptr,
+                use_tcp_ ? vsomeip::reliability_type_e::RT_RELIABLE : vsomeip::reliability_type_e::RT_UNRELIABLE);
 
+        if (debug > 2) LOG_TRACE << "[offer] is_offered=true" << LOG_CR;
         is_offered_ = true;
         notify_condition_.notify_one();
     }
 
     void stop_offer() {
-        LOG_INFO << "Application '" << app_->get_name() << "' stop offering Service ["
-                << to_hex(HELLO_SERVICE_ID) << "." << to_hex(HELLO_INSTANCE_ID)
-                << " v" << HELLO_SERVICE_MAJOR << "." << HELLO_SERVICE_MINOR
-                << "]" << LOG_CR;
-        app_->stop_offer_service(
-                HELLO_SERVICE_ID, HELLO_INSTANCE_ID,
-                HELLO_SERVICE_MAJOR, HELLO_SERVICE_MINOR);
-
+        LOG_INFO << "[stop_offer] Application '" << app_->get_name() << "' stop offering Service ["
+                 << print_service_ver(config_.service_id, config_.instance_id, config_.major_version, config_.minor_version)
+                 << "]" << LOG_CR;
+        app_->stop_offer_service(config_.service_id, config_.instance_id, config_.major_version, config_.minor_version);
         is_offered_ = false;
-    }
-
-    void on_state(vsomeip::state_type_e _state) {
-        LOG_INFO << "Application '" << app_->get_name() << "' is "
-                << (_state == vsomeip::state_type_e::ST_REGISTERED ?
-                "registered." : "deregistered.") << LOG_CR;
-
-        is_registered_ = (_state == vsomeip::state_type_e::ST_REGISTERED);
-        if (is_registered_) {
-            // we are registered at the runtime and can offer our service
-            // offer(); -> this generates a blocking state handler!
-        }
     }
 
     void offer_th() {
@@ -435,7 +598,10 @@ public:
 
     bool notify_event(HelloEvent& event) {
         if (!is_offered_ || !running_) return true; // not sending events..
-
+        if (subscribe_count_ <= 0) {
+            if (debug > 4) LOG_TRACE << "[notify_event] No subscribers, skipping event #" << to_string(event.timer_id) << LOG_CR;
+            return true;
+        }
         if (debug > 1) {
             LOG_DEBUG << "[notify_event] ### " << to_string(event) << LOG_CR;
         }
@@ -446,8 +612,8 @@ public:
         }
         if (debug > 2) {
             LOG_TRACE << "[notify_event] ### app.notify("
-                    << to_hex(HELLO_SERVICE_ID) << "." << to_hex(HELLO_SERVICE_ID) << "/"
-                    << to_hex(HELLO_EVENT_ID) << ") -> "
+                    << print_service(config_.service_id, config_.instance_id) << "/"
+                    << to_hex(config_.event_id) << ") -> "
                     << payload->get_length() << " bytes" << LOG_CR;
         }
         if (debug > 3) {
@@ -455,7 +621,7 @@ public:
                     << bytes_to_string(payload->get_data(), payload->get_length())
                     << "]" << LOG_CR;
         }
-        app_->notify(HELLO_SERVICE_ID, HELLO_INSTANCE_ID, HELLO_EVENT_ID, payload);
+        app_->notify(config_.service_id, config_.instance_id, config_.event_id, payload);
         return true;
     }
 
@@ -543,6 +709,49 @@ public:
 
 };
 
+void init_from_environment(service_config_t &config) {
+    config.service_id = get_env_uint32("UP_SERVICE", HELLO_SERVICE_ID);;
+    config.instance_id = get_env_uint32("UP_INSTANCE", HELLO_INSTANCE_ID);
+    config.major_version = static_cast<vsomeip::major_version_t>(
+                           get_env_uint32("UP_SERVICE_MAJOR", HELLO_SERVICE_MAJOR));
+    config.minor_version = static_cast<vsomeip::minor_version_t>(
+                           get_env_uint32("UP_SERVICE_MINOR", HELLO_SERVICE_MINOR));
+    config.method_id = get_env_uint32("UP_METHOD", HELLO_METHOD_ID);
+    config.eventgroup_id = get_env_uint32("UP_EVENTGROUP", HELLO_EVENTGROUP_ID);
+    config.event_id = get_env_uint32("UP_EVENT", HELLO_EVENT_ID);
+
+    const char* used_service_list = ::getenv("UP_SERVICES");
+    config.used_services.clear();
+    if (used_service_list) {
+        std::istringstream tokenStream(used_service_list);
+        std::string token;
+        while (std::getline(tokenStream, token, ',')) {
+            try {
+                vsomeip::service_t serv_id = static_cast<vsomeip::service_t>(parse_uint32(token));
+                config.used_services.insert(serv_id);
+            } catch (const std::exception& e) {
+                LOG_ERROR << "[init_from_environment] Invalid 'UP_SERVICES': " << used_service_list  << LOG_CR;
+            }
+        }
+    }
+    // make sure config.service_id is in used_services
+    config.used_services.insert(config.service_id);
+    if (debug > 0) {
+        std::stringstream ss;
+        ss << "[init_from_environment] Service["
+            << print_service_ver(config.service_id, config.instance_id, config.major_version, config.minor_version)
+            << "] Method:" << to_hex(config.method_id)
+            << ", Event:" << to_hex(config.event_id)
+            << "/{" << to_hex(config.eventgroup_id) << "}"
+            << ", UP Services:[ ";
+        for (const auto& service : config.used_services) {
+            ss << to_hex(service) << " ";
+        }
+        ss << "]";
+        LOG_DEBUG << ss.str() << LOG_CR;
+    }
+}
+
 } // namespace HelloExample
 
 static HelloExample::hello_service *its_sample_ptr = nullptr;
@@ -555,7 +764,10 @@ static void handle_signal(int _signal) {
     }
 }
 
+using HelloExample::to_hex;
+
 void print_help(const char* name) {
+
     std::cout
             << "Usage: " << name << " {OPTIONS}\n\n"
             << "OPTIONS:\n"
@@ -572,6 +784,15 @@ void print_help(const char* name) {
             << "  TIMER_CB_US     (experimental) Timer callback maximum delay (microseconds). Default: 0=disabled\n"
             << "  TIMER_DEBUG     (experimental) Timer debug level. Default: 0=disabled\n"
             << "  NO_TIMERS       (experimental) if set, disables timers and sends tmer events without any delay.\n"
+            // UP HelloService override properties
+            << "\n  UP_SERVICE          Use specified u16 value for HelloService service_id.    Default 0x" << to_hex(HELLO_SERVICE_ID)
+            << "\n  UP_INSTANCE         Use specified u16 value for HelloService instance_id.   Default 0x" << to_hex(HELLO_INSTANCE_ID)
+            << "\n  UP_SERVICE_MAJOR    Use specified  u8 value for HelloService major version. Default " << HELLO_SERVICE_MAJOR
+            << "\n  UP_SERVICE_MINOR    Use specified u32 value for HelloService minor version. Default " << HELLO_SERVICE_MINOR
+            << "\n  UP_METHOD           Use specified u16 value for HelloService method_id.     Default 0x" << to_hex(HELLO_METHOD_ID)
+            << "\n  UP_EVENTGROUP       Use specified u16 value for HelloService eventgroup_id. Default 0x" << to_hex(HELLO_EVENTGROUP_ID)
+            << "\n  UP_EVENT            Use specified u16 value for HelloService event_id.      Default 0x" << to_hex(HELLO_EVENT_ID)
+            << "\n  UP_SERVICES         Use specified list of alternative HelloService service_id. e.g. \"0x6000,0x60001\", Default: N/A"
             << "\n"
             << std::endl;
 }
@@ -580,6 +801,7 @@ void print_help(const char* name) {
 int main(int argc, char **argv) {
 
     bool use_tcp = false;
+    int32_t instances = 1; // default instance count to offer
 
     std::string tcp_enable("--tcp");
     std::string udp_enable("--udp");
@@ -620,6 +842,9 @@ int main(int argc, char **argv) {
         }
     }
 
+    // update 1st service to UP_XXX from environment
+    HelloExample::init_from_environment(HelloExample::DEFAULT_CONFIG);
+
     if (debug > 0) {
         LOG_DEBUG << "[main] Enabled timers: " << HelloExample::map_to_string(HelloExample::timer_enabled) << LOG_CR;
     }
@@ -636,10 +861,10 @@ int main(int argc, char **argv) {
     }
     if (!app_config) {
         LOG_ERROR << "Environment variable VSOMEIP_CONFIGURATION not set!" << LOG_CR;
-        exit(2);
+        //exit(2);
     }
 
-    HelloExample::hello_service its_sample(use_tcp);
+    HelloExample::hello_service its_sample(use_tcp, HelloExample::DEFAULT_CONFIG);
     its_sample_ptr = &its_sample;
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
