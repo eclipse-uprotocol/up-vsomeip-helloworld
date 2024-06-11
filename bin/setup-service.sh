@@ -32,6 +32,14 @@ if [ "$OLD_UNICAST" != "$CFG_UNICAST" ]; then
     jq --arg ip "$CFG_UNICAST" '.unicast=$ip' "$VSOMEIP_CONFIGURATION" > "$VSOMEIP_CONFIGURATION.tmp" && mv "$VSOMEIP_CONFIGURATION.tmp" "$VSOMEIP_CONFIGURATION"
 fi
 
+# get declared services
+SERVICE_COUNT=$(jq -r '.services | length' "$VSOMEIP_CONFIGURATION")
+if [ -n "$SERVICE_COUNT" ] && [ "$SERVICE_COUNT" -gt 1 ]; then
+    UP_SERVICES=$(jq -r '[.services[].service] | join(",")' "$VSOMEIP_CONFIGURATION")
+    echo "### $VSOMEIP_CONFIGURATION: UP Services: [$UP_SERVICES]"
+    export UP_SERVICES
+fi
+
 # export LD_LIBRARY_PATH=/usr/local/lib
 # export LD_LIBRARY_PATH="$BUILD_DIR/_deps/vsomeip3-build:$LD_LIBRARY_PATH"
 if [ -d "$SCRIPT_DIR/../lib" ]; then

@@ -28,15 +28,14 @@ fi
 ### replace host ip to enable remote endpoint (udp) usecases
 if [ -z "$CFG_UNICAST" ]; then
 	CFG_UNICAST="$(hostname -I | cut -d ' ' -f 1)"
-    echo "# unicast: $CFG_UNICAST"
+    echo "# Detected unicast: $CFG_UNICAST"
 fi
 OLD_UNICAST=$(jq -r '.unicast' "$VSOMEIP_CONFIGURATION")
 if [ "$OLD_UNICAST" != "$CFG_UNICAST" ]; then
     echo "### $VSOMEIP_CONFIGURATION: Replacing unicast [$OLD_UNICAST] with [$CFG_UNICAST]"
     jq --arg ip "$CFG_UNICAST" '.unicast=$ip' "$VSOMEIP_CONFIGURATION" > "$VSOMEIP_CONFIGURATION.tmp" && mv "$VSOMEIP_CONFIGURATION.tmp" "$VSOMEIP_CONFIGURATION"
 fi
-# export LD_LIBRARY_PATH=/usr/local/lib
-# export LD_LIBRARY_PATH="$BUILD_DIR/_deps/vsomeip3-build:$LD_LIBRARY_PATH"
+
 if [ -d "$SCRIPT_DIR/../lib" ]; then
     export LD_LIBRARY_PATH="$SCRIPT_DIR/../lib:$LD_LIBRARY_PATH"
 else
