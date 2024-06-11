@@ -21,15 +21,18 @@
   "applications": [
     {
       "name": "hello_service",
-      "id": "0x1234"
+      "id": "0x1234",
+      "max_dispatchers": "10",
+      "max_dispatch_time": "100",
+      "threads": "2"
     }
   ],
   "services": [
     {
       "service": "0x6000",
       "instance": "0x0001",
-      "unreliable": "31234",
-      "reliable": { "port" : "31235", "enable-magic-cookies" : "false" }
+      "unreliable": "31231",
+      "reliable": { "port" : "31231", "enable-magic-cookies" : "false" }
     }
   ],
   "routing": "hello_service",
@@ -37,6 +40,9 @@
     "enable": "true",
     "multicast": "239.0.0.1",
     "port": "30490",
-    "protocol": "udp"
+    "protocol": "udp",
+    "ttl": "60",
+    "cyclic_offer_delay" : "10000",
+    "max_remote_subscribers": "1"
   }
 }

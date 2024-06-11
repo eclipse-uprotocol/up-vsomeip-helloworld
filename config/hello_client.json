@@ -5,7 +5,7 @@
   "logging": {
     "level": "debug",
     "console": "true",
-    "file": { "enable": "false", "path": "/var/log/vsomeip.log" },
+    "file": { "enable": "false", "path": "/tmp/vsomeip.log" },
     "dlt": "false",
     "version": { "enable": "false" },
     "__status_log_interval": "10",
@@ -43,6 +43,9 @@
     "enable": "true",
     "multicast": "239.0.0.1",
     "port": "30490",
-    "protocol": "udp"
+    "protocol": "udp",
+    "ttl": "16777215",
+    "cyclic_offer_delay" : "10000",
+    "max_remote_subscribers": "1"
   }
 }

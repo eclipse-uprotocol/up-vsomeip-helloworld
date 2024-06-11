@@ -24,7 +24,7 @@ export VSOMEIP_CONFIGURATION="$SCRIPT_DIR/config/hello_client-proxy.json"
 ### replace host ip to enable remote endpoint (udp) usecases
 if [ -z "$CFG_UNICAST" ]; then
 	CFG_UNICAST="$(hostname -I | cut -d ' ' -f 1)"
-    echo "# unicast: $CFG_UNICAST"
+    echo "# Detected unicast: $CFG_UNICAST"
 fi
 OLD_UNICAST=$(jq -r '.unicast' "$VSOMEIP_CONFIGURATION")
 if [ "$OLD_UNICAST" != "$CFG_UNICAST" ]; then

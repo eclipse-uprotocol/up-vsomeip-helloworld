@@ -52,7 +52,7 @@ include(FetchContent)
 # add_definitions(-DVSOMEIP_ENABLE_SIGNAL_HANDLING=1)
 
 set(FETCHCONTENT_QUIET "OFF")
-set (CMAKE_WARN_DEPRECATED "OFF")
+set(CMAKE_WARN_DEPRECATED "OFF")
 
 set(VSOMEIP_TAG "3.4.10")
 # set(VSOMEIP_TAG "3.1.20.3")
@@ -79,6 +79,9 @@ FetchContent_MakeAvailable(vsomeip3)
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -s")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 
+## uncomment for better gdb support
+#set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -fcoroutines -fno-inline -O0 -pthread -std=gnu++11")
+
 # add sources after vsomeip3 is populated
 add_subdirectory(src)
 
@@ -90,6 +93,7 @@ install(PROGRAMS
   ./bin/setup-service.sh
   ./bin/setup-client-proxy.sh
   ./bin/setup-client.sh
+  ./bin/gen-services.sh
   DESTINATION "${CMAKE_INSTALL_PREFIX}/bin"
 )
 

@@ -18,7 +18,10 @@
   "applications": [
     {
       "name": "hello_client",
-      "id": "0x3456"
+      "id": "0x3456",
+      "max_dispatchers": "10",
+      "max_dispatch_time": "1000",
+      "threads": "2"
     }
   ],
   "clients": [

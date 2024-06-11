@@ -19,15 +19,16 @@
 #define HELLO_INSTANCE_ID      0x0001
 #define HELLO_METHOD_ID        0x8001
 
-#define HELLO_EVENTGROUP_ID    0x0100
+#define HELLO_EVENTGROUP_ID    0x8005   // assume 1:1 mapping with event_id for eventgroup
 #define HELLO_EVENT_ID         0x8005
+
 
 /// IMPORTANT: should match vsomeip::DEFAULT_MAJOR in (interface/vsomeip/constants.hpp):
 // but Autosar works better if vsomeip::DEFAULT_MAJOR is 1 (thus Autosar needs custom vsomeip build)
 #define HELLO_SERVICE_MAJOR    (int)(vsomeip::DEFAULT_MAJOR) // 1u
 #define HELLO_SERVICE_MINOR    0u
 
-// #define AUTOSAR_WIRE    // [experimental] If defined use dynamic string length (uint32_t) before string payload
+// #define AUTOSAR_WIRE           1 // [experimental] If defined use dynamic string length (uint32_t) before string payload
 
 namespace HelloExample {
 

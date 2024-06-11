@@ -18,10 +18,53 @@
 #*******************************************************************************
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+####################################################################################################################
+# Usage $0 [args]               Launch Hello Service with optional arguments.
+#          [--client] [args]    Launch Hello Client instead of Hello Service, with remaining arguments.
+#          [--gen [count]]      Regenerate Service config with optional service count, applying UP_* env vars.
+#
+####################################################################################################################
+
+update_up_config() {
+    local config_file="$1"
+    local old_config
+    old_config=$(jq '.' "$config_file")
+    if [ -z "$old_config" ]; then
+        echo "### $config_file: Error parsing JSON!" 1>&2
+        return 1
+    fi
+    local json_contents="$old_config"
+
+    # optionally update unicast address and service discovery settings
+    if [ -n "$UP_UNICAST" ]; then
+        json_contents=$(echo "$json_contents" | jq --arg ip "$UP_UNICAST" '.unicast=$ip')
+    fi
+    if [ -n "$UP_SD_MULTICAST" ]; then
+        json_contents=$(echo "$json_contents" | jq --arg ip "$UP_SD_MULTICAST" '."service-discovery".multicast=$ip')
+    fi
+    if [ -n "$UP_SD_PORT" ]; then
+        json_contents=$(echo "$json_contents" | jq --arg port "$UP_SD_PORT" '."service-discovery".port=$port')
+    fi
+    if [ -n "$UP_SD_TTL" ]; then
+        json_contents=$(echo "$json_contents" | jq --arg ttl "$UP_SD_TTL" '."service-discovery".ttl=$ttl')
+    fi
+
+    # only update if something changed
+    if [ "$old_config" != "$json_contents" ]; then
+        echo "$json_contents" > "$config_file.tmp" && mv "$config_file.tmp" "$config_file"
+        echo "### $config_file: Updated."
+        cat "$config_file"
+        echo
+    fi
+    return 0
+}
+
+USE_CLIENT=0
 # allow easy switching between client/service
 if [ "$1" == "--client" ]; then
     shift
-    echo "# Configuring as Hello Client: $*"
+    USE_CLIENT=1
+    echo "# Configuring as Hello Client, args: $*"
     if [ -z "$VSOMEIP_APPLICATION_NAME" ]; then
         export VSOMEIP_APPLICATION_NAME="hello_client"
     fi
@@ -38,17 +81,37 @@ if [ -z "$VSOMEIP_CONFIGURATION" ]; then
     fi
     export VSOMEIP_CONFIGURATION
 fi
-
 [ -z "$VSOMEIP_APPLICATION_NAME" ] && export VSOMEIP_APPLICATION_NAME="hello_service"
 
-if [ -z "$CFG_UNICAST" ]; then
-	CFG_UNICAST="$(hostname -I | cut -d ' ' -f 1)"
+# set default unicast address if not already provided
+if [ -z "$UP_UNICAST" ]; then
+	UP_UNICAST="$(hostname -I | cut -d ' ' -f 1)"
+    echo "# Detected unicast: $UP_UNICAST"
 fi
-echo "# Using unicast: $CFG_UNICAST"
-
 
 # default debug levels
 [ -z "$DEBUG" ] && export DEBUG=1 ### INFO
+
+# Allow regenerating Service config with optional number of services and custom id values from UP_* env. vars
+if [ $USE_CLIENT -ne 1 ] && [ "$1" == "--gen" ]; then
+    shift
+    GEN_SERVICE_COUNT="$1"
+    shift
+    [ -z "$GEN_SERVICE_COUNT" ] && GEN_SERVICE_COUNT=1
+
+    echo "### Regenerating Service config: $VSOMEIP_CONFIGURATION"
+    echo '--- ENV ---'
+    env | grep -e "UP_\|VSOMEIP_" | sort
+    echo '---'
+    echo
+    ./gen-services.sh "$VSOMEIP_CONFIGURATION" "$GEN_SERVICE_COUNT" "$VSOMEIP_CONFIGURATION"
+
+    # export list of used (alternative) service IDs
+    UP_SERVICES=$(jq -r '[.services[].service] | join(",")' "$VSOMEIP_CONFIGURATION")
+    echo "### UP Services: [$UP_SERVICES]"
+    export UP_SERVICES
+    echo
+fi
 
 echo
 
@@ -60,11 +123,12 @@ if [ ! -f "$VSOMEIP_CONFIGURATION" ]; then
 else
     echo "****************************"
     echo "SOME/IP config: $VSOMEIP_CONFIGURATION"
-    ### Replace unicast address with Hostname -I (1st record)
-    if grep -q "unicast" "$VSOMEIP_CONFIGURATION"; then
-        echo "### Replacing uinicast: $CFG_UNICAST in $VSOMEIP_CONFIGURATION"
-        jq --arg ip "$CFG_UNICAST" '.unicast=$ip' "$VSOMEIP_CONFIGURATION" > "$VSOMEIP_CONFIGURATION.tmp" && mv "$VSOMEIP_CONFIGURATION.tmp" "$VSOMEIP_CONFIGURATION"
+
+    # replace common UP_UNICAST, UP_SD_* variables 
+    if ! update_up_config "$VSOMEIP_CONFIGURATION"; then
+        exit 1
     fi
+
     ### Sanity checks for application name
     CONFIG_APP=$(jq -r  '.applications[0].name' "$VSOMEIP_CONFIGURATION")
     ROUTING_APP=$(jq -r '.routing' "$VSOMEIP_CONFIGURATION")

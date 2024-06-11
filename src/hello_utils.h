@@ -18,6 +18,7 @@
 #pragma once
 
 #include <chrono>
+#include <string>
 
 #include <stdint.h>
 #include <vsomeip/vsomeip.hpp>
@@ -25,7 +26,8 @@
 
 static const std::string COL_NONE = "\033[0m";
 static const std::string COL_RED = "\033[0;31m";
-static const std::string COL_BLUE = "\033[0;34m";
+static const std::string COL_BLUE = "\033[0;94m";
+static const std::string COL_DARKBLUE = "\033[0;34m";
 static const std::string COL_YELLOW = "\033[0;33m";
 static const std::string COL_WHITE = "\033[0;37m";
 static const std::string COL_WHITE_BOLD = "\033[1;37m";
@@ -33,33 +35,46 @@ static const std::string COL_GREEN = "\033[0;32m";
 
 namespace HelloExample {
 
-bool serialize_hello_request(const HelloRequest& request, std::shared_ptr<vsomeip::payload> payload);
-bool deserialize_hello_request(HelloRequest &request, std::shared_ptr<vsomeip::payload> payload);
-std::string to_string(const HelloRequest& request);
+    bool serialize_hello_request(const HelloRequest& request, std::shared_ptr<vsomeip::payload> payload);
+    bool deserialize_hello_request(HelloRequest &request, std::shared_ptr<vsomeip::payload> payload);
+    std::string to_string(const HelloRequest& request);
 
-bool serialize_hello_response(const HelloResponse& request, std::shared_ptr<vsomeip::payload> payload);
-bool deserialize_hello_response(HelloResponse &request, std::shared_ptr<vsomeip::payload> payload);
-std::string to_string(const HelloResponse& request);
+    bool serialize_hello_response(const HelloResponse& request, std::shared_ptr<vsomeip::payload> payload);
+    bool deserialize_hello_response(HelloResponse &request, std::shared_ptr<vsomeip::payload> payload);
+    std::string to_string(const HelloResponse& request);
 
-void init_hello_event(HelloEvent &event);
-void set_hello_event(HelloEvent &event,
-        std::chrono::high_resolution_clock::time_point tp = std::chrono::high_resolution_clock::now());
+    void init_hello_event(HelloEvent &event);
+    void set_hello_event(HelloEvent &event,
+            std::chrono::high_resolution_clock::time_point tp = std::chrono::high_resolution_clock::now());
 
-bool serialize_hello_event(const HelloEvent& event, std::shared_ptr<vsomeip::payload> payload);
-bool deserialize_hello_event(HelloEvent &event, std::shared_ptr<vsomeip::payload> payload);
-std::string to_string(const HelloEvent& request);
-std::ostream& operator<<(std::ostream& os, const TimerID& id);
-std::chrono::time_point<std::chrono::high_resolution_clock> to_time_point(const HelloEvent& event);
-int timer_interval_ms(const TimerID& id);
+    bool serialize_hello_event(const HelloEvent& event, std::shared_ptr<vsomeip::payload> payload);
+    bool deserialize_hello_event(HelloEvent &event, std::shared_ptr<vsomeip::payload> payload);
+    std::string to_string(const HelloEvent& request);
+    std::ostream& operator<<(std::ostream& os, const TimerID& id);
+    std::chrono::time_point<std::chrono::high_resolution_clock> to_time_point(const HelloEvent& event);
+    int timer_interval_ms(const TimerID& id);
 
-std::string to_string(const TimerID& id);
-int to_int(const TimerID& id);
+    std::string to_string(const TimerID& id);
+    int to_int(const TimerID& id);
 
-std::string to_string(vsomeip::return_code_e rc);
+    std::string to_string(vsomeip::return_code_e rc);
 
-std::string to_string(const std::vector<vsomeip::byte_t> &data);
-std::string bytes_to_string(const vsomeip::byte_t *data, uint32_t length);
-std::string to_string(vsomeip::message_type_e msg_type);
-std::string to_hex(uint32_t value, int padding=4);
+    std::string to_string(const std::vector<vsomeip::byte_t> &data);
+    std::string bytes_to_string(const vsomeip::byte_t *data, uint32_t length);
+    std::string to_string(vsomeip::message_type_e msg_type);
+    std::string to_hex(uint32_t value, int padding=4);
 
+    /** @brief Get uint32_t value from environment variable (supporting "0x" prefix for hex values)*/
+    uint32_t get_env_uint32(const std::string &env_name, const uint32_t default_val);
+
+    uint32_t parse_uint32(const std::string &value);
+
+    std::string print_service(vsomeip::service_t service,
+                              vsomeip::instance_t instance);
+
+    std::string print_service_ver(vsomeip::service_t service,
+                              vsomeip::instance_t instance,
+                              vsomeip::major_version_t major_version = vsomeip::DEFAULT_MAJOR,
+                              vsomeip::minor_version_t minor_version = vsomeip::DEFAULT_MINOR);
 } // namespace HelloExample
+

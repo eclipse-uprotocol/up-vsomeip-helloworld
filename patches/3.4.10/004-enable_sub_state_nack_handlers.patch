@@ -1,0 +1,152 @@
+diff --git a/implementation/runtime/src/application_impl.cpp b/implementation/runtime/src/application_impl.cpp
+index aba906b..624b1a4 100644
+--- a/implementation/runtime/src/application_impl.cpp
++++ b/implementation/runtime/src/application_impl.cpp
+@@ -48,6 +48,10 @@ configuration::~configuration() {}
+ uint32_t application_impl::app_counter__ = 0;
+ std::mutex application_impl::app_counter_mutex__;
+ 
++// Workaround if defined, enable subscription_state handlers upon an erorrs (e.g. SUB NACK).
++// To be considered as conditional trigger for a bugfix PR in vsomeip
++static bool SUB_STATE_HANDLE_NACK = (::getenv("VSOMEIP_SUB_STATE_OLD") == NULL);
++
+ application_impl::application_impl(const std::string &_name, const std::string &_path)
+         : runtime_(runtime::get()),
+           client_(VSOMEIP_CLIENT_UNSET),
+@@ -1162,6 +1166,8 @@ void application_impl::deliver_subscription_state(service_t _service, instance_t
+     std::vector<subscription_status_handler_t> handlers;
+     {
+         std::lock_guard<std::mutex> its_lock(subscription_status_handlers_mutex_);
++        bool should_handle = !_error || SUB_STATE_HANDLE_NACK;
++
+         auto found_service = subscription_status_handlers_.find(_service);
+         if (found_service != subscription_status_handlers_.end()) {
+             auto found_instance = found_service->second.find(_instance);
+@@ -1170,13 +1176,13 @@ void application_impl::deliver_subscription_state(service_t _service, instance_t
+                 if (found_eventgroup != found_instance->second.end()) {
+                     auto found_event = found_eventgroup->second.find(_event);
+                     if (found_event != found_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_event->second.second)) {
++                        if (should_handle || (_error && found_event->second.second)) {
+                             handlers.push_back(found_event->second.first);
+                         }
+                     }
+                     auto found_any_event = found_eventgroup->second.find(ANY_EVENT);
+                     if (found_any_event != found_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_any_event->second.second)) {
++                        if (should_handle || (_error && found_any_event->second.second)) {
+                             handlers.push_back(found_any_event->second.first);
+                         }
+                     }
+@@ -1185,13 +1191,13 @@ void application_impl::deliver_subscription_state(service_t _service, instance_t
+                 if (found_any_eventgroup != found_instance->second.end()) {
+                     auto found_event = found_any_eventgroup->second.find(_event);
+                     if (found_event != found_any_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_event->second.second)) {
++                        if (should_handle || (_error && found_event->second.second)) {
+                             handlers.push_back(found_event->second.first);
+                         }
+                     }
+                     auto found_any_event = found_any_eventgroup->second.find(ANY_EVENT);
+                     if (found_any_event != found_any_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_any_event->second.second)) {
++                        if (should_handle || (_error && found_any_event->second.second)) {
+                             handlers.push_back(found_any_event->second.first);
+                         }
+                     }
+@@ -1203,13 +1209,13 @@ void application_impl::deliver_subscription_state(service_t _service, instance_t
+                 if (found_eventgroup != found_instance->second.end()) {
+                     auto found_event = found_eventgroup->second.find(_event);
+                     if (found_event != found_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_event->second.second)) {
++                        if (should_handle || (_error && found_event->second.second)) {
+                             handlers.push_back(found_event->second.first);
+                         }
+                     }
+                     auto found_any_event = found_eventgroup->second.find(ANY_EVENT);
+                     if (found_any_event != found_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_any_event->second.second)) {
++                        if (should_handle || (_error && found_any_event->second.second)) {
+                             handlers.push_back(found_any_event->second.first);
+                         }
+                     }
+@@ -1218,13 +1224,13 @@ void application_impl::deliver_subscription_state(service_t _service, instance_t
+                 if (found_any_eventgroup != found_instance->second.end()) {
+                     auto found_event = found_any_eventgroup->second.find(_event);
+                     if (found_event != found_any_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_event->second.second)) {
++                        if (should_handle || (_error && found_event->second.second)) {
+                             handlers.push_back(found_event->second.first);
+                         }
+                     }
+                     auto found_any_event = found_any_eventgroup->second.find(ANY_EVENT);
+                     if (found_any_event != found_any_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_any_event->second.second)) {
++                        if (should_handle || (_error && found_any_event->second.second)) {
+                             handlers.push_back(found_any_event->second.first);
+                         }
+                     }
+@@ -1239,13 +1245,13 @@ void application_impl::deliver_subscription_state(service_t _service, instance_t
+                 if (found_eventgroup != found_instance->second.end()) {
+                     auto found_event = found_eventgroup->second.find(_event);
+                     if (found_event != found_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_event->second.second)) {
++                        if (should_handle || (_error && found_event->second.second)) {
+                             handlers.push_back(found_event->second.first);
+                         }
+                     }
+                     auto found_any_event = found_eventgroup->second.find(ANY_EVENT);
+                     if (found_any_event != found_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_any_event->second.second)) {
++                        if (should_handle || (_error && found_any_event->second.second)) {
+                             handlers.push_back(found_any_event->second.first);
+                         }
+                     }
+@@ -1254,13 +1260,13 @@ void application_impl::deliver_subscription_state(service_t _service, instance_t
+                 if (found_any_eventgroup != found_instance->second.end()) {
+                     auto found_event = found_any_eventgroup->second.find(_event);
+                     if (found_event != found_any_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_event->second.second)) {
++                        if (should_handle || (_error && found_event->second.second)) {
+                             handlers.push_back(found_event->second.first);
+                         }
+                     }
+                     auto found_any_event = found_any_eventgroup->second.find(ANY_EVENT);
+                     if (found_any_event != found_any_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_any_event->second.second)) {
++                        if (should_handle || (_error && found_any_event->second.second)) {
+                             handlers.push_back(found_any_event->second.first);
+                         }
+                     }
+@@ -1272,13 +1278,13 @@ void application_impl::deliver_subscription_state(service_t _service, instance_t
+                 if (found_eventgroup != found_instance->second.end()) {
+                     auto found_event = found_eventgroup->second.find(_event);
+                     if (found_event != found_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_event->second.second)) {
++                        if (should_handle || (_error && found_event->second.second)) {
+                             handlers.push_back(found_event->second.first);
+                         }
+                     }
+                     auto found_any_event = found_eventgroup->second.find(ANY_EVENT);
+                     if (found_any_event != found_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_any_event->second.second)) {
++                        if (should_handle || (_error && found_any_event->second.second)) {
+                             handlers.push_back(found_any_event->second.first);
+                         }
+                     }
+@@ -1287,13 +1293,13 @@ void application_impl::deliver_subscription_state(service_t _service, instance_t
+                 if (found_any_eventgroup != found_instance->second.end()) {
+                     auto found_event = found_any_eventgroup->second.find(_event);
+                     if (found_event != found_any_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_event->second.second)) {
++                        if (should_handle || (_error && found_event->second.second)) {
+                             handlers.push_back(found_event->second.first);
+                         }
+                     }
+                     auto found_any_event = found_any_eventgroup->second.find(ANY_EVENT);
+                     if (found_any_event != found_any_eventgroup->second.end()) {
+-                        if (!_error || (_error && found_any_event->second.second)) {
++                        if (should_handle || (_error && found_any_event->second.second)) {
+                             handlers.push_back(found_any_event->second.first);
+                         }
+                     }
